@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Four Keypoint Visualizer</title>
+    <link rel="stylesheet" href="/visualize.css">
+  </head>
+  <body>
+    <main class="viewer">
+      <header class="bar">
+        <div>
+          <h1>Four Keypoint Visualizer</h1>
+          <p>输入图片名或 label 名，可视化当前四点标注结果。</p>
+        </div>
+        <form id="loadForm" class="load-form">
+          <input id="fileInput" placeholder="例如 img_2161505.jpg 或 img_2161505.txt" autocomplete="off">
+          <button type="submit">加载</button>
+        </form>
+      </header>
+
+      <section class="content">
+        <aside class="image-list-panel">
+          <div class="list-head">
+            <strong>图片列表</strong>
+            <span id="listMeta">加载中...</span>
+          </div>
+          <input id="filterInput" class="filter-input" placeholder="过滤文件名">
+          <div id="imageList" class="image-list"></div>
+        </aside>
+
+        <section class="canvas-panel">
+          <canvas id="canvas"></canvas>
+          <div id="message" class="message">输入文件名后点击加载</div>
+        </section>
+
+        <aside class="side">
+          <div class="summary">
+            <strong id="imageName">未加载</strong>
+            <span id="meta"></span>
+          </div>
+          <div class="editor-tools">
+            <button id="saveBtn" class="primary">保存</button>
+            <button id="resetBtn">重新标定</button>
+            <button id="deletePointBtn">删除当前点</button>
+            <button id="deleteLabelBtn" class="danger">删除 label</button>
+          </div>
+          <div id="editHint" class="edit-hint">左键拖点修改，右键点切换可见性，右键拖拽移动图片。</div>
+          <div id="pointList" class="point-list"></div>
+        </aside>
+      </section>
+    </main>
+    <script src="/visualize.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "four-keypoint-labeler",
+  "version": "1.0.0",
+  "description": "Multi-user 4-keypoint YOLO pose annotation tool",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:intranet": "HOST=0.0.0.0 PORT=3000 node server.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

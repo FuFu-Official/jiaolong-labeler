@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Four Keypoint Labeler</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <section id="authView" class="auth-view">
+        <div class="auth-panel">
+          <h1>Four Keypoint Labeler</h1>
+          <form id="authForm">
+            <label>
+              用户名
+              <input id="username" autocomplete="username" required>
+            </label>
+            <label>
+              密码
+              <input id="password" type="password" autocomplete="current-password" minlength="4" required>
+            </label>
+            <div class="auth-actions">
+              <button type="submit" data-mode="login">登录</button>
+              <button type="button" id="registerBtn">注册</button>
+            </div>
+            <p id="authMessage" class="message"></p>
+          </form>
+        </div>
+      </section>
+
+      <section id="workView" class="work-view hidden">
+        <header class="topbar">
+          <div>
+            <strong id="taskTitle">未加载任务</strong>
+            <span id="statusText"></span>
+          </div>
+          <div class="top-actions">
+            <button id="prevBtn">上一张（A）</button>
+            <button id="nextBtn">下一张（D）</button>
+            <button id="logoutBtn">退出</button>
+          </div>
+        </header>
+
+        <section class="workspace">
+          <aside class="sidebar">
+            <div class="panel">
+              <h2>标注流程</h2>
+              <ol class="steps">
+                <li id="stepCorners">依次点击四个关键点：左上、左下、右下、右上</li>
+                <li>这四个点会直接作为 YOLO pose 关键点导出</li>
+                <li>拖拽点位微调，右键点位可直接切换可见性</li>
+              </ol>
+            </div>
+
+            <div class="panel">
+              <h2>快捷键</h2>
+              <div class="shortcut-list">
+                <span>上一张 <kbd>A</kbd><kbd>←</kbd></span>
+                <span>下一张 <kbd>D</kbd><kbd>→</kbd></span>
+                <span>切换可见性 <kbd>V</kbd></span>
+                <span><kbd>滚轮</kbd>缩放图片</span>
+                <span>移动图片 <kbd>右键拖拽</kbd></span>
+                <span>切换该点可见性 <kbd>右键点</kbd></span>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h2>当前点</h2>
+              <div id="selectedInfo" class="selected-info">未选择</div>
+              <div class="tool-row">
+                <button id="visibleBtn">切换可见</button>
+                <button id="deleteBtn">删除点</button>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h2>关键点</h2>
+              <div id="pointList" class="point-list"></div>
+            </div>
+
+            <div class="panel">
+              <h2>保存</h2>
+              <div class="tool-row">
+                <button id="doneBtn" class="primary">完成提交并下一张</button>
+              </div>
+              <button id="resetBtn" class="wide">重置当前图</button>
+              <p id="saveMessage" class="message"></p>
+            </div>
+          </aside>
+
+          <section class="canvas-shell">
+            <canvas id="canvas"></canvas>
+            <div id="emptyState" class="empty-state">点击“下一张”分配图片</div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+[Unit]
+Description=Four Keypoint Labeler annotation server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/engineer/workspace/LableEngineer/four-keypoint-labeler
+Environment=PORT=3000
+ExecStart=/usr/bin/node /home/engineer/workspace/LableEngineer/four-keypoint-labeler/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

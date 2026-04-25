@@ -1,0 +1,7 @@
+data/store.json
+labels/*.txt
+exports/*.json
+*.tmp
+node_modules/
+label-engineer.log
+label-engineer.pid
