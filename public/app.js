@@ -7,6 +7,7 @@ const passwordInput = document.querySelector("#password");
 const authMessage = document.querySelector("#authMessage");
 const statusText = document.querySelector("#statusText");
 const taskTitle = document.querySelector("#taskTitle");
+const shortcutCorners = document.querySelector("#shortcutCorners");
 const prevBtn = document.querySelector("#prevBtn");
 const nextBtn = document.querySelector("#nextBtn");
 const logoutBtn = document.querySelector("#logoutBtn");
@@ -24,6 +25,7 @@ const saveMessage = document.querySelector("#saveMessage");
 
 let user = null;
 let template = null;
+let runtime = { appName: "Jiaolong Labeler", authEnabled: true, deploymentMode: "shared", annotation: { cornerCount: 4 } };
 let task = null;
 let image = new Image();
 let imageLoaded = false;
@@ -39,7 +41,7 @@ let magnifier = null;
 let taskHistory = [];
 let historyIndex = -1;
 
-const cornerIds = ["corner_0", "corner_1", "corner_2", "corner_3"];
+let cornerIds = [];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -64,30 +66,85 @@ function showWork() {
 }
 
 function showAuth() {
+  if (!runtime.authEnabled) return showWork();
   workView.classList.add("hidden");
   authView.classList.remove("hidden");
 }
 
+function deriveCornerIds(nextTemplate) {
+  const explicitCount = Number(nextTemplate?.cornerCount);
+  const fromNames = Array.isArray(nextTemplate?.cornerNames) ? nextTemplate.cornerNames.length : 0;
+  const fromConfig = Number(runtime?.annotation?.cornerCount);
+  const count = Math.max(1, Number.isFinite(explicitCount) ? explicitCount : fromNames || fromConfig || 4);
+  return Array.from({ length: count }, (_, index) => `corner_${index}`);
+}
+
+function selectedCornerNames() {
+  return cornerIds.map((id, index) => pointName(id, `corner_${index + 1}`));
+}
+
+function applyRuntimeUi() {
+  const authTitle = document.querySelector("#authTitle");
+  const appName = runtime.appName || "Jiaolong Labeler";
+  document.title = appName;
+  if (authTitle) authTitle.textContent = appName;
+  registerBtn.classList.toggle("hidden", !runtime.authEnabled);
+  logoutBtn.classList.toggle("hidden", !runtime.authEnabled);
+  const loginBtn = authForm.querySelector("button[type='submit']");
+  if (loginBtn) loginBtn.classList.toggle("hidden", !runtime.authEnabled);
+}
+
+function updateStepText() {
+  const stepCorners = document.querySelector("#stepCorners");
+  const stepExport = document.querySelector("#stepExport");
+  const names = selectedCornerNames();
+  if (stepCorners) {
+    stepCorners.textContent = `依次点击 ${cornerIds.length} 个关键点：${names.join("、")}`;
+  }
+  if (stepExport) {
+    stepExport.textContent = `关键点将按模板顺序导出（共 ${template?.keypointCount || cornerIds.length} 个）`;
+  }
+  if (shortcutCorners) {
+    shortcutCorners.textContent = `${cornerIds.length} 个关键点`;
+  }
+}
+
 async function init() {
+  try {
+    runtime = { ...runtime, ...(await api("/api/runtime")) };
+  } catch {}
+  applyRuntimeUi();
+
   try {
     const me = await api("/api/me");
     user = me.user;
+    if (me.runtime) runtime = { ...runtime, ...me.runtime };
+    applyRuntimeUi();
     showWork();
     await loadTemplate();
     await refreshStatus();
   } catch {
-    showAuth();
+    if (runtime.authEnabled) showAuth();
+    else {
+      user = { id: "local-user", username: "local" };
+      showWork();
+      await loadTemplate();
+      await refreshStatus().catch(() => {});
+    }
   }
   resizeCanvas();
 }
 
 async function loadTemplate() {
   template = await api("/api/template");
+  cornerIds = deriveCornerIds(template);
+  updateStepText();
 }
 
 async function refreshStatus() {
   const status = await api("/api/status");
-  statusText.textContent = `${user.username} · 我已标注 ${status.completedByMe || 0} · 总数 ${status.total} · 已完成 ${status.done} · 剩余 ${status.remaining}`;
+  const mode = runtime.authEnabled ? "" : "（本地模式）";
+  statusText.textContent = `${user.username}${mode} · 我已标注 ${status.completedByMe || 0} · 总数 ${status.total} · 已完成 ${status.done} · 剩余 ${status.remaining}`;
 }
 
 async function submitAuth(mode) {
@@ -100,6 +157,8 @@ async function submitAuth(mode) {
       body: JSON.stringify({ username, password })
     });
     user = result.user;
+    if (result.runtime) runtime = { ...runtime, ...result.runtime };
+    applyRuntimeUi();
     showWork();
     await loadTemplate();
     await refreshStatus();
@@ -150,6 +209,12 @@ function generateInternalPoints(selectFirstGenerated = true) {
     if (selectFirstGenerated) selectedId = corners[corners.length - 1]?.id || selectedId;
     return;
   }
+  if (cornerIds.length !== 4) {
+    const others = points.filter((point) => !point.id.startsWith("corner_"));
+    points = [...corners, ...others];
+    if (selectFirstGenerated) selectedId = others[0]?.id || corners[corners.length - 1]?.id || selectedId;
+    return;
+  }
   const generated = internals.map((item, index) => {
     const projected = projectUnitPoint(corners, Number(item.u), Number(item.v));
     return {
@@ -165,6 +230,10 @@ function generateInternalPoints(selectFirstGenerated = true) {
 }
 
 function projectUnitPoint(corners, u, v) {
+  if (!Array.isArray(corners) || corners.length !== 4) {
+    const first = corners[0] || { x: 0, y: 0 };
+    return { x: first.x, y: first.y };
+  }
   const [tl, bl, br, tr] = corners;
   const top = lerpPoint(tl, tr, u);
   const bottom = lerpPoint(bl, br, u);
@@ -224,7 +293,7 @@ function drawPolygon() {
     if (index === 0) ctx.moveTo(pos.x, pos.y);
     else ctx.lineTo(pos.x, pos.y);
   });
-  if (corners.length === 4) ctx.closePath();
+  if (corners.length === cornerIds.length) ctx.closePath();
   ctx.stroke();
   ctx.restore();
 }
@@ -499,7 +568,7 @@ async function saveLabelBeforeSwitch(status = "draft") {
     return true;
   }
   if (!hasAllCorners()) {
-    setMessage(saveMessage, "请先标出四个关键点，再切换图片或提交。", "error");
+    setMessage(saveMessage, `请先标出 ${cornerIds.length} 个关键点，再切换图片或提交。`, "error");
     return false;
   }
   task.annotation = {
@@ -532,7 +601,7 @@ async function saveLabelBeforeSwitch(status = "draft") {
 async function save(status) {
   if (!task || !imageLoaded) return;
   if (status === "done" && !hasAllCorners()) {
-    setMessage(saveMessage, "完成提交前需要先标出四个关键点。", "error");
+    setMessage(saveMessage, `完成提交前需要先标出 ${cornerIds.length} 个关键点。`, "error");
     return;
   }
   if (await saveLabelBeforeSwitch(status)) {

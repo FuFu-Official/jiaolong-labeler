@@ -1,44 +1,74 @@
-# Four Keypoint Labeler
+# Jiaolong Labeler
 
-一个面向多人协作的图片四关键点标注小站。把待标注图片放到 `images/total`，标注员注册或登录后领取图片，依次点击四个关键点，切换图片或完成提交时会自动写入 `labels/` 下的同名 `.txt` 文件。
+中文文档：`README.zh-CN.md`
 
-## 启动
+Jiaolong Labeler is a configurable YOLO keypoint annotation tool.
+
+- Supports flexible keypoint setup by template file (not limited to 4 points).
+- Supports two deployment modes: `local` (single machine) and `shared` (multi-user collaboration).
+- Writes labels to `labels/<image-name>.txt` in YOLO pose format.
+
+## 1) Requirements
+
+- Node.js `>=18`
+- Place images in `images/total`
+- Supported image extensions are controlled in `server.js` (`IMAGE_EXTS`)
+
+## 2) Configuration
+
+The app loads runtime config from `config/app-config.json`.
+
+1. Copy example:
 
 ```bash
-npm start
+cp config/app-config.example.json config/app-config.json
 ```
 
-打开 `http://localhost:3000`。如果需要给局域网内其他机器访问，可以使用服务器机器的局域网 IP，例如 `http://192.168.x.x:3000`。
+2. Edit config file.
 
-如需和原项目同时运行，换一个端口：
+Example (`config/app-config.json`):
 
-```bash
-PORT=3001 npm start
+```json
+{
+  "appName": "Jiaolong Labeler",
+  "deploymentMode": "local",
+  "localUser": {
+    "id": "local-user",
+    "username": "local"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 3000
+  },
+  "annotation": {
+    "cornerCount": 4,
+    "templateFile": "data/template.json"
+  }
+}
 ```
 
-## 标注流程
+### Key config fields
 
-1. 标注员注册或登录。
-2. 点击“下一张”，系统会领取一张未被占用、未标注的图片。
-3. 在图片上依次点击四个关键点：左上、左下、右下、右上。
-4. 拖拽任意点微调位置，选中点后点击“切换可见”可标为不可见。键盘 `V` 也可以切换当前点可见性，右键点击某个点可直接翻转该点可见性。
-5. 点击“下一张”或“完成提交并下一张”都会自动写入 `labels/` 下的同名 `.txt` 文件。返回修改时，系统会优先读取这个 label 文件并在修改后覆盖它。
+- `deploymentMode`: `local` or `shared`
+  - `local`: no login/register required; uses `localUser` directly
+  - `shared`: login/register enabled for collaboration
+- `server.host` / `server.port`: bind address and port
+  - local recommended: `127.0.0.1`
+  - shared/LAN recommended: `0.0.0.0`
+- `annotation.cornerCount`: expected number of corner keypoints (`corner_0 ... corner_n`)
+- `annotation.templateFile`: template file path
 
-快捷键：
+Environment variables can override config values:
 
-- `A` 或 `←`：上一张
-- `D` 或 `→`：下一张
-- `V`：切换当前选中点可见性
+- `APP_MODE` overrides `deploymentMode`
+- `HOST` overrides `server.host`
+- `PORT` overrides `server.port`
 
-视图操作：
+## 3) Template and keypoints
 
-- 鼠标滚轮：以鼠标位置为中心缩放图片
-- 鼠标右键拖拽：平移图片
-- 鼠标左键拖动关键点：移动关键点，拖动时会显示局部放大框和准星
+Template source of truth is configured by `annotation.templateFile` (default `data/template.json`).
 
-## 关键点模板
-
-模板文件是 `data/template.json`：
+Example:
 
 ```json
 {
@@ -49,35 +79,87 @@ PORT=3001 npm start
 }
 ```
 
-`cornerNames` 控制界面显示名称，`exportOrder` 控制 label 文件里的关键点顺序。默认顺序是：
+- `cornerNames`: UI display names for corner points
+- `exportOrder`: output order in YOLO label
+- `internalPoints`: optional generated/internal points
 
-```text
-top_left bottom_left bottom_right top_right
-```
+Effective keypoint count is determined by the normalized template:
 
-## Label 文件
+- corner count = max(`annotation.cornerCount`, `cornerNames.length`)
+- total keypoints = corner points + internal points
 
-标注会自动写入 `labels/`，每张图一个同名 `.txt` 文件。这个文件使用 YOLO pose 的行格式：前 5 个字段描述类别和目标框，后面按 `data/template.json` 的顺序依次写 4 个关键点。
-
-输出格式为：
-
-```text
-class_id center_x center_y width height kp1_x kp1_y kp1_visibility kp2_x kp2_y kp2_visibility kp3_x kp3_y kp3_visibility kp4_x kp4_y kp4_visibility
-```
-
-每个关键点包含 `x y v` 三个数据。整行前面的 5 个字段不是关键点，它们是 YOLO pose 训练格式要求的目标类别和目标框：
-
-- `class_id`：类别编号
-- `center_x center_y width height`：目标框，当前由已标注点的最小外接框计算
-
-所有坐标都是相对图片宽高归一化后的值。可见性使用常见 keypoint 约定：`2` 表示可见，`1` 表示已标注但不可见，`0` 表示模板里有这个点但当前没有有效标注。
-
-如果使用 Ultralytics YOLO pose，数据集配置里的关键点形状应为：
+For Ultralytics YOLO pose, set:
 
 ```yaml
-kpt_shape: [4, 3]
+kpt_shape: [<total_keypoint_count>, 3]
 ```
 
-## 数据文件
+Example: if 6 keypoints in total, use `kpt_shape: [6, 3]`.
 
-运行时数据保存在 `data/store.json`，导出摘要保存在 `exports/last-export.json`。这些文件已加入 `.gitignore`，避免把实际标注过程数据误提交。
+## 4) Run
+
+### Local mode (single machine)
+
+```bash
+npm run start:local
+```
+
+Open: `http://127.0.0.1:3000`
+
+### Shared mode (LAN/server)
+
+```bash
+npm run start:shared
+```
+
+Open: `http://<server-ip>:3000`
+
+Background helper scripts:
+
+```bash
+./scripts/start-intranet.sh
+./scripts/stop-intranet.sh
+```
+
+## 5) systemd deployment (Linux)
+
+The repository includes a service unit file: `deploy/jiaolong-labeler.service`.
+
+Before enabling it:
+
+1. Update `WorkingDirectory` and `ExecStart` to your server path.
+2. Adjust `Environment` values (`APP_MODE`, `HOST`, `PORT`) as needed.
+
+Install and enable:
+
+```bash
+sudo cp deploy/jiaolong-labeler.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now jiaolong-labeler.service
+```
+
+Common operations:
+
+```bash
+sudo systemctl status jiaolong-labeler.service
+sudo systemctl restart jiaolong-labeler.service
+sudo journalctl -u jiaolong-labeler.service -f
+```
+
+## 6) Data layout
+
+- Images: `images/total`
+- Runtime state: `data/store.json`
+- Labels output: `labels/*.txt`
+- Export summary: `exports/last-export.json`
+
+## 7) Manual verification
+
+No test/lint pipeline is configured in this repo.
+
+Recommended checks:
+
+1. Start server in `local` and `shared` modes.
+2. Verify annotation flow on `/`.
+3. Verify visualize/edit flow on `/visualize.html`.
+4. Confirm output keypoint count/order matches template.

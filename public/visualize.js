@@ -19,6 +19,7 @@ ctx.imageSmoothingEnabled = false;
 
 let image = new Image();
 let data = null;
+let runtime = { appName: "Jiaolong Labeler", authEnabled: true, deploymentMode: "shared", annotation: { cornerCount: 4 } };
 let view = { ox: 0, oy: 0, width: 0, height: 0 };
 let zoom = 1;
 let pan = { x: 0, y: 0 };
@@ -30,7 +31,7 @@ let recalibrating = false;
 let cornerDraft = null;
 let contextClick = null;
 
-const cornerIds = ["corner_0", "corner_1", "corner_2", "corner_3"];
+let cornerIds = [];
 
 function setMessage(text, show = true) {
   message.textContent = text;
@@ -47,10 +48,31 @@ async function api(path, options = {}) {
   return payload;
 }
 
+function deriveCornerIds(nextTemplate) {
+  const explicitCount = Number(nextTemplate?.cornerCount);
+  const fromNames = Array.isArray(nextTemplate?.cornerNames) ? nextTemplate.cornerNames.length : 0;
+  const fromConfig = Number(runtime?.annotation?.cornerCount);
+  const count = Math.max(1, Number.isFinite(explicitCount) ? explicitCount : fromNames || fromConfig || 4);
+  return Array.from({ length: count }, (_, index) => `corner_${index}`);
+}
+
+function applyRuntimeUi() {
+  const titleEl = document.querySelector("#viewerTitle");
+  const descEl = document.querySelector("#viewerDesc");
+  const appName = runtime.appName || "Jiaolong Labeler";
+  document.title = `${appName} Visualizer`;
+  if (titleEl) titleEl.textContent = `${appName} Visualizer`;
+  if (descEl) {
+    const modeText = runtime.authEnabled ? "shared" : "local";
+    descEl.textContent = `输入图片名或 label 名，可视化并编辑关键点标注结果（${modeText} mode）。`;
+  }
+}
+
 async function loadLabel(name) {
   setMessage("加载中...");
   const payload = await api(`/api/visualize?imageName=${encodeURIComponent(name)}`);
   data = payload;
+  cornerIds = deriveCornerIds(data.template);
   selectedId = data.points.find((point) => point.labeled !== false)?.id || data.points[0]?.id || null;
   recalibrating = false;
   image = new Image();
@@ -94,10 +116,11 @@ function updateHint() {
   }
   if (recalibrating) {
     const index = currentCornerIndex();
+    const names = cornerIds.map((id, idx) => cornerName(id, `corner_${idx + 1}`)).join("、");
     editHint.textContent =
       index >= 0
-        ? `重新标定：请按 左上、左下、右下、右上 点击第 ${index + 1} 个关键点。`
-        : "四个关键点已完成，可以拖动微调后保存。";
+        ? `重新标定：请按 ${names} 的顺序，点击第 ${index + 1} 个关键点。`
+        : `${cornerIds.length} 个关键点已完成，可以拖动微调后保存。`;
     return;
   }
   editHint.textContent = "左键拖点修改，右键点切换可见性，右键拖拽移动图片。";
@@ -327,6 +350,12 @@ function generateInternalPoints() {
     orderPoints();
     return;
   }
+  if (cornerIds.length !== 4) {
+    const others = data.points.filter((point) => !point.id.startsWith("corner_") && point.labeled !== false);
+    selectedId = others[0]?.id || corners[corners.length - 1]?.id || selectedId;
+    orderPoints();
+    return;
+  }
   const [tl, bl, br, tr] = corners;
   for (const item of data.template?.internalPoints || []) {
     const u = Number(item.u);
@@ -362,7 +391,7 @@ async function saveLabel() {
   if (!data) return;
   const labeled = data.points.filter((point) => point.labeled !== false);
   if (cornerIds.some((id) => !labeled.some((point) => point.id === id))) {
-    setMessage("保存前需要先标出四个关键点。");
+    setMessage(`保存前需要先标出 ${cornerIds.length} 个关键点。`);
     return;
   }
   try {
@@ -561,6 +590,12 @@ canvas.addEventListener(
 window.addEventListener("resize", resizeCanvas);
 
 const initialFile = new URLSearchParams(window.location.search).get("file");
+api("/api/runtime")
+  .then((payload) => {
+    runtime = { ...runtime, ...payload };
+    applyRuntimeUi();
+  })
+  .catch(() => {});
 loadImageList().catch((error) => {
   listMeta.textContent = "加载失败";
   setMessage(error.message);

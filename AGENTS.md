@@ -7,8 +7,9 @@
 
 ## Runtime + commands
 - Required runtime: Node `>=18` (`package.json` engines).
-- Main local start: `npm start` (binds `0.0.0.0`, default port `3000` from `PORT`).
-- LAN helper: `npm run start:intranet` (sets `HOST=0.0.0.0 PORT=3000`, but current server only reads `PORT`).
+- Main local start: `npm run start:local` (or `npm start`), defaults to `deploymentMode=local`.
+- Shared mode start: `npm run start:shared` (`APP_MODE=shared HOST=0.0.0.0 PORT=3000`).
+- Runtime config file: `config/app-config.json` (auto-created from defaults if missing).
 - Background scripts: `scripts/start-intranet.sh` and `scripts/stop-intranet.sh` use PID/log files in repo root.
 
 ## Data and persistence (important)
@@ -28,4 +29,4 @@
 
 ## Git hygiene in this repo
 - `.gitignore` excludes `data/store.json`, `labels/*.txt`, and `exports/*.json`.
-- `.gitignore` does **not** exclude `four-keypoint-labeler.log` / `four-keypoint-labeler.pid` (the current script defaults), so check `git status` before committing after using background scripts.
+- `.gitignore` also excludes `jiaolong-labeler.log` / `jiaolong-labeler.pid` and `config/app-config.json`.

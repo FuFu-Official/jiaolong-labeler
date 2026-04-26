@@ -3,5 +3,8 @@ labels/*.txt
 exports/*.json
 *.tmp
 node_modules/
-label-engineer.log
-label-engineer.pid
+jiaolong-labeler.log
+jiaolong-labeler.pid
+four-keypoint-labeler.log
+four-keypoint-labeler.pid
+config/app-config.json

@@ -1,0 +1,16 @@
+[Unit]
+Description=Jiaolong Labeler annotation server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/engineer/workspace/jiaolong-labeler
+Environment=APP_MODE=shared
+Environment=HOST=0.0.0.0
+Environment=PORT=3000
+ExecStart=/usr/bin/node /home/engineer/workspace/jiaolong-labeler/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Four Keypoint Visualizer</title>
+    <title>Jiaolong Labeler Visualizer</title>
     <link rel="stylesheet" href="/visualize.css">
   </head>
   <body>
     <main class="viewer">
       <header class="bar">
         <div>
-          <h1>Four Keypoint Visualizer</h1>
-          <p>输入图片名或 label 名，可视化当前四点标注结果。</p>
+          <h1 id="viewerTitle">Jiaolong Labeler Visualizer</h1>
+          <p id="viewerDesc">输入图片名或 label 名，可视化并编辑关键点标注结果。</p>
         </div>
         <form id="loadForm" class="load-form">
           <input id="fileInput" placeholder="例如 img_2161505.jpg 或 img_2161505.txt" autocomplete="off">

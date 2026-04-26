@@ -6,7 +6,7 @@ const crypto = require("crypto");
 const { URL } = require("url");
 
 const ROOT = __dirname;
-const PORT = Number(process.env.PORT || 3000);
+const CONFIG_DIR = path.join(ROOT, "config");
 const DATA_DIR = path.join(ROOT, "data");
 const IMAGE_DIR = path.join(ROOT, "images", "total");
 const PUBLIC_DIR = path.join(ROOT, "public");
@@ -14,15 +14,162 @@ const LABEL_DIR = path.join(ROOT, "labels");
 const EXPORT_DIR = path.join(ROOT, "exports");
 const STORE_PATH = path.join(DATA_DIR, "store.json");
 const TEMPLATE_PATH = path.join(DATA_DIR, "template.json");
+const APP_CONFIG_PATH = path.join(CONFIG_DIR, "app-config.json");
 
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]);
 const sessions = new Map();
 let writeQueue = Promise.resolve();
 
+const DEFAULT_APP_CONFIG = {
+  appName: "Jiaolong Labeler",
+  deploymentMode: "local",
+  localUser: {
+    id: "local-user",
+    username: "local"
+  },
+  server: {
+    host: "127.0.0.1",
+    port: 3000
+  },
+  annotation: {
+    cornerCount: 4,
+    templateFile: "data/template.json"
+  }
+};
+
+function toPositiveInt(value, fallback) {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function asString(value, fallback) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return fallback;
+}
+
+function normalizeDeploymentMode(value) {
+  return String(value || "").toLowerCase() === "shared" ? "shared" : "local";
+}
+
+function defaultCornerNames(count) {
+  const seeded = ["top_left", "bottom_left", "bottom_right", "top_right"];
+  return Array.from({ length: count }, (_, index) => seeded[index] || `corner_${index + 1}`);
+}
+
+function normalizeAppConfig(rawConfig = {}) {
+  const config = typeof rawConfig === "object" && rawConfig ? rawConfig : {};
+  const deploymentMode = normalizeDeploymentMode(process.env.APP_MODE || config.deploymentMode || DEFAULT_APP_CONFIG.deploymentMode);
+  const hostFallback = deploymentMode === "shared" ? "0.0.0.0" : "127.0.0.1";
+  const serverConfig = config.server || {};
+  const annotationConfig = config.annotation || {};
+  const localUserConfig = config.localUser || {};
+
+  return {
+    appName: asString(config.appName, DEFAULT_APP_CONFIG.appName),
+    deploymentMode,
+    localUser: {
+      id: asString(localUserConfig.id, DEFAULT_APP_CONFIG.localUser.id),
+      username: asString(localUserConfig.username, DEFAULT_APP_CONFIG.localUser.username)
+    },
+    server: {
+      host: asString(process.env.HOST, asString(serverConfig.host, hostFallback)),
+      port: toPositiveInt(process.env.PORT, toPositiveInt(serverConfig.port, DEFAULT_APP_CONFIG.server.port))
+    },
+    annotation: {
+      cornerCount: toPositiveInt(annotationConfig.cornerCount, DEFAULT_APP_CONFIG.annotation.cornerCount),
+      templateFile: asString(annotationConfig.templateFile, DEFAULT_APP_CONFIG.annotation.templateFile)
+    }
+  };
+}
+
+function resolveTemplatePath(appConfig) {
+  const requested = appConfig?.annotation?.templateFile || DEFAULT_APP_CONFIG.annotation.templateFile;
+  const full = path.resolve(ROOT, requested);
+  if (full === ROOT || full.startsWith(`${ROOT}${path.sep}`)) return full;
+  return TEMPLATE_PATH;
+}
+
+function normalizeTemplate(rawTemplate = {}, appConfig) {
+  const configuredCornerCount = toPositiveInt(appConfig?.annotation?.cornerCount, DEFAULT_APP_CONFIG.annotation.cornerCount);
+  const source = typeof rawTemplate === "object" && rawTemplate ? rawTemplate : {};
+  const rawCornerNames = Array.isArray(source.cornerNames)
+    ? source.cornerNames.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
+  const cornerCount = Math.max(configuredCornerCount, rawCornerNames.length, 1);
+  const fallbackNames = defaultCornerNames(cornerCount);
+  const cornerNames = fallbackNames.map((fallback, index) => rawCornerNames[index] || fallback);
+
+  const internalPoints = Array.isArray(source.internalPoints)
+    ? source.internalPoints.map((point, index) => ({
+        id: String(point?.id || index + 1),
+        name: String(point?.name || `kp_${index + 1}`),
+        u: Number(point?.u),
+        v: Number(point?.v)
+      }))
+    : [];
+
+  const allIds = [
+    ...cornerNames.map((_, index) => `corner_${index}`),
+    ...internalPoints.map((point) => `kp_${point.id}`)
+  ];
+  const validIds = new Set(allIds);
+
+  const ordered = [];
+  if (Array.isArray(source.exportOrder)) {
+    for (const id of source.exportOrder.map((item) => String(item))) {
+      if (validIds.has(id) && !ordered.includes(id)) ordered.push(id);
+    }
+  }
+  for (const id of allIds) {
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+
+  return {
+    classId: Number.isFinite(Number(source.classId)) ? Number(source.classId) : 0,
+    cornerNames,
+    exportOrder: ordered,
+    internalPoints,
+    cornerCount: cornerNames.length,
+    keypointCount: cornerNames.length + internalPoints.length
+  };
+}
+
+async function readAppConfig() {
+  return normalizeAppConfig(await readJson(APP_CONFIG_PATH, DEFAULT_APP_CONFIG));
+}
+
+async function readTemplate(appConfig) {
+  const templatePath = resolveTemplatePath(appConfig);
+  const fallback = {
+    classId: 0,
+    cornerNames: defaultCornerNames(toPositiveInt(appConfig?.annotation?.cornerCount, DEFAULT_APP_CONFIG.annotation.cornerCount)),
+    exportOrder: [],
+    internalPoints: []
+  };
+  return normalizeTemplate(await readJson(templatePath, fallback), appConfig);
+}
+
+function isAuthEnabled(appConfig) {
+  return appConfig?.deploymentMode === "shared";
+}
+
+function currentLocalUser(appConfig) {
+  return {
+    id: appConfig?.localUser?.id || DEFAULT_APP_CONFIG.localUser.id,
+    username: appConfig?.localUser?.username || DEFAULT_APP_CONFIG.localUser.username
+  };
+}
+
 async function ensureStore() {
+  await fsp.mkdir(CONFIG_DIR, { recursive: true });
   await fsp.mkdir(DATA_DIR, { recursive: true });
   await fsp.mkdir(LABEL_DIR, { recursive: true });
   await fsp.mkdir(EXPORT_DIR, { recursive: true });
+  try {
+    await fsp.access(APP_CONFIG_PATH);
+  } catch {
+    await writeJson(APP_CONFIG_PATH, DEFAULT_APP_CONFIG);
+  }
   try {
     await fsp.access(STORE_PATH);
   } catch {
@@ -94,7 +241,8 @@ function parseCookies(req) {
   );
 }
 
-function currentUser(req) {
+function currentUser(req, appConfig) {
+  if (!isAuthEnabled(appConfig)) return currentLocalUser(appConfig);
   const sid = parseCookies(req).sid;
   return sid ? sessions.get(sid) : null;
 }
@@ -141,7 +289,9 @@ function labelPathForImage(imageName) {
 }
 
 function orderedPointDefs(template) {
-  const cornerNames = template.cornerNames || ["top_left", "top_right", "bottom_right", "bottom_left"];
+  const cornerNames = Array.isArray(template.cornerNames) && template.cornerNames.length
+    ? template.cornerNames
+    : defaultCornerNames(toPositiveInt(template.cornerCount, DEFAULT_APP_CONFIG.annotation.cornerCount));
   const corners = cornerNames.map((name, index) => ({ id: `corner_${index}`, name: String(name || `corner_${index + 1}`) }));
   const internals = (template.internalPoints || []).map((point, index) => ({
     id: `kp_${point.id || index + 1}`,
@@ -229,9 +379,9 @@ async function writeLabelForAnnotation(annotation, template) {
   await fsp.writeFile(labelPathForImage(annotation.imageName), `${annotationToYolo(annotation, template)}\n`);
 }
 
-async function exportLabels() {
+async function exportLabels(appConfig) {
   const store = await readJson(STORE_PATH, { annotations: {} });
-  const template = await readJson(TEMPLATE_PATH, { classId: 0 });
+  const template = await readTemplate(appConfig);
   let count = 0;
   await fsp.mkdir(LABEL_DIR, { recursive: true });
   for (const [imageName, annotation] of Object.entries(store.annotations || {})) {
@@ -245,7 +395,27 @@ async function exportLabels() {
 }
 
 async function handleApi(req, res, url) {
+  const appConfig = await readAppConfig();
+  const template = await readTemplate(appConfig);
+  const runtime = {
+    appName: appConfig.appName,
+    deploymentMode: appConfig.deploymentMode,
+    authEnabled: isAuthEnabled(appConfig),
+    annotation: {
+      cornerCount: template.cornerCount,
+      keypointCount: template.keypointCount,
+      templateFile: appConfig.annotation.templateFile
+    }
+  };
+
+  if (url.pathname === "/api/runtime" && req.method === "GET") {
+    return send(res, 200, runtime);
+  }
+
   if (url.pathname === "/api/register" && req.method === "POST") {
+    if (!isAuthEnabled(appConfig)) {
+      return send(res, 400, { error: "当前是本地模式，不需要注册。", runtime });
+    }
     const { username, password } = await readBody(req);
     if (!username || !password || String(password).length < 4) return send(res, 400, { error: "用户名和至少 4 位密码是必填项" });
     const user = await withStore((store) => {
@@ -259,10 +429,13 @@ async function handleApi(req, res, url) {
     if (user.error) return send(res, 409, user);
     const sid = crypto.randomUUID();
     sessions.set(sid, user);
-    return send(res, 200, { user }, { "Set-Cookie": `sid=${encodeURIComponent(sid)}; HttpOnly; SameSite=Lax; Path=/` });
+    return send(res, 200, { user, runtime }, { "Set-Cookie": `sid=${encodeURIComponent(sid)}; HttpOnly; SameSite=Lax; Path=/` });
   }
 
   if (url.pathname === "/api/login" && req.method === "POST") {
+    if (!isAuthEnabled(appConfig)) {
+      return send(res, 200, { user: currentLocalUser(appConfig), runtime });
+    }
     const { username, password } = await readBody(req);
     const store = await readJson(STORE_PATH, { users: [] });
     const found = store.users.find((user) => user.username === String(username || "").trim());
@@ -270,10 +443,11 @@ async function handleApi(req, res, url) {
     const user = { id: found.id, username: found.username };
     const sid = crypto.randomUUID();
     sessions.set(sid, user);
-    return send(res, 200, { user }, { "Set-Cookie": `sid=${encodeURIComponent(sid)}; HttpOnly; SameSite=Lax; Path=/` });
+    return send(res, 200, { user, runtime }, { "Set-Cookie": `sid=${encodeURIComponent(sid)}; HttpOnly; SameSite=Lax; Path=/` });
   }
 
   if (url.pathname === "/api/logout" && req.method === "POST") {
+    if (!isAuthEnabled(appConfig)) return send(res, 200, { ok: true, runtime });
     const sid = parseCookies(req).sid;
     if (sid) sessions.delete(sid);
     return send(res, 200, { ok: true }, { "Set-Cookie": "sid=; Max-Age=0; Path=/" });
@@ -287,10 +461,7 @@ async function handleApi(req, res, url) {
     const imageName = images.find((name) => path.parse(name).name === imageBase || name === path.basename(rawName));
     if (!imageName) return send(res, 404, { error: `找不到图片：${rawName}` });
 
-    const [store, template] = await Promise.all([
-      readJson(STORE_PATH, { annotations: {}, claims: {} }),
-      readJson(TEMPLATE_PATH, { internalPoints: [] })
-    ]);
+    const store = await readJson(STORE_PATH, { annotations: {}, claims: {} });
     const annotation = await annotationForImage(imageName, store, template);
     const orderedPoints = orderedAnnotationPoints(annotation, template);
     return send(res, 200, {
@@ -311,7 +482,6 @@ async function handleApi(req, res, url) {
     if (!imageName || !Array.isArray(body.points)) return send(res, 400, { error: "缺少图片名或点位数据" });
     const images = await imageList();
     if (!images.includes(imageName)) return send(res, 404, { error: "图片不存在" });
-    const template = await readJson(TEMPLATE_PATH, { internalPoints: [] });
     const annotation = {
       imageName,
       status: "done",
@@ -369,13 +539,13 @@ async function handleApi(req, res, url) {
     });
   }
 
-  const user = currentUser(req);
+  const user = currentUser(req, appConfig);
   if (!user) return send(res, 401, { error: "请先登录" });
 
-  if (url.pathname === "/api/me" && req.method === "GET") return send(res, 200, { user });
+  if (url.pathname === "/api/me" && req.method === "GET") return send(res, 200, { user, runtime });
 
   if (url.pathname === "/api/template" && req.method === "GET") {
-    return send(res, 200, await readJson(TEMPLATE_PATH, { internalPoints: [] }));
+    return send(res, 200, template);
   }
 
   if (url.pathname === "/api/status" && req.method === "GET") {
@@ -390,11 +560,7 @@ async function handleApi(req, res, url) {
   if (url.pathname === "/api/task" && req.method === "GET") {
     const imageName = path.basename(String(url.searchParams.get("imageName") || ""));
     if (!imageName) return send(res, 400, { error: "缺少图片名" });
-    const [images, store, template] = await Promise.all([
-      imageList(),
-      readJson(STORE_PATH, { annotations: {}, claims: {} }),
-      readJson(TEMPLATE_PATH, { internalPoints: [] })
-    ]);
+    const [images, store] = await Promise.all([imageList(), readJson(STORE_PATH, { annotations: {}, claims: {} })]);
     if (!images.includes(imageName)) return send(res, 404, { error: "图片不存在" });
     return send(res, 200, { task: { imageName, annotation: await annotationForImage(imageName, store, template) } });
   }
@@ -418,7 +584,6 @@ async function handleApi(req, res, url) {
     const body = await readBody(req).catch(() => ({}));
     const skipImageName = body.skipImageName ? path.basename(String(body.skipImageName)) : null;
     const images = await imageList();
-    const template = await readJson(TEMPLATE_PATH, { internalPoints: [] });
     const task = await withStore((store) => {
       const own = Object.entries(store.claims).find(
         ([imageName, claim]) => imageName !== skipImageName && claim.userId === user.id && store.annotations[imageName]?.status !== "done"
@@ -442,7 +607,6 @@ async function handleApi(req, res, url) {
   if (url.pathname === "/api/annotation" && req.method === "POST") {
     const body = await readBody(req);
     if (!body.imageName || !Array.isArray(body.points)) return send(res, 400, { error: "缺少图片名或点位数据" });
-    const template = await readJson(TEMPLATE_PATH, { internalPoints: [] });
     const saved = await withStore((store) => {
       const status = body.status === "done" ? "done" : "draft";
       store.annotations[body.imageName] = {
@@ -468,7 +632,7 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname === "/api/export" && req.method === "POST") {
-    return send(res, 200, await exportLabels());
+    return send(res, 200, await exportLabels(appConfig));
   }
 
   return send(res, 404, { error: "接口不存在" });
@@ -491,6 +655,9 @@ async function serveStatic(req, res, url) {
 
 async function main() {
   await ensureStore();
+  const appConfig = await readAppConfig();
+  const host = appConfig.server.host;
+  const port = appConfig.server.port;
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
@@ -501,8 +668,9 @@ async function main() {
       return send(res, 500, { error: error.message || "服务器错误" });
     }
   });
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Four Keypoint Labeler running at http://localhost:${PORT}`);
+  server.listen(port, host, () => {
+    const displayHost = host === "0.0.0.0" ? "localhost" : host;
+    console.log(`${appConfig.appName} running at http://${displayHost}:${port} (${appConfig.deploymentMode})`);
   });
 }
 
