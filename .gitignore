@@ -1,5 +1,5 @@
 data/store.json
-labels/*.txt
+labels/**
 exports/*.json
 *.tmp
 node_modules/
