@@ -8,3 +8,4 @@ jiaolong-labeler.pid
 four-keypoint-labeler.log
 four-keypoint-labeler.pid
 config/app-config.json
+images/**
