@@ -3,7 +3,7 @@
 ## Repo shape
 - Single-process Node app (no framework): backend + static hosting are both in `server.js`.
 - Frontend entrypoints are `public/index.html` + `public/app.js` (annotation UI) and `public/visualize.html` + `public/visualize.js` (label review/edit UI).
-- Images must be placed in `images/total`; only files with extensions in `IMAGE_EXTS` in `server.js` are considered tasks.
+- Images must be placed in `images`; recursive subfolders are supported, and only files with extensions in `IMAGE_EXTS` in `server.js` are considered tasks.
 
 ## Runtime + commands
 - Required runtime: Node `>=18` (`package.json` engines).
@@ -14,7 +14,7 @@
 
 ## Data and persistence (important)
 - Live state is file-based, not DB-backed: `data/store.json`.
-- Label outputs are written per image to `labels/<image-basename>.txt` in YOLO pose format.
+- Label outputs are written per image to `labels/<relative-image-path>.txt` in YOLO pose format.
 - Export summary writes to `exports/last-export.json`.
 - `data/template.json` is the source of truth for keypoint naming and export order (`exportOrder` drives label point order).
 

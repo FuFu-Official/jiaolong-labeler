@@ -11,7 +11,7 @@ Jiaolong Labeler 是一个可配置的 YOLO 关键点标注工具。
 ## 1）环境要求
 
 - Node.js `>=18`
-- 待标注图片放入 `images/total`
+- 待标注图片放入 `images`（支持多级子文件夹）
 - 支持的图片后缀在 `server.js` 的 `IMAGE_EXTS` 中定义
 
 ## 2）配置方式
@@ -148,9 +148,9 @@ sudo journalctl -u jiaolong-labeler.service -f
 
 ## 6）数据目录
 
-- 图片目录：`images/total`
+- 图片目录：`images`（支持递归子目录）
 - 运行状态：`data/store.json`
-- 标注输出：`labels/*.txt`
+- 标注输出：`labels/<图片相对路径>.txt`
 - 导出摘要：`exports/last-export.json`
 
 ## 7）验证建议

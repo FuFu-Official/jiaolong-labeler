@@ -11,7 +11,7 @@ Jiaolong Labeler is a configurable YOLO keypoint annotation tool.
 ## 1) Requirements
 
 - Node.js `>=18`
-- Place images in `images/total`
+- Place images under `images` (nested subfolders are supported)
 - Supported image extensions are controlled in `server.js` (`IMAGE_EXTS`)
 
 ## 2) Configuration
@@ -148,9 +148,9 @@ sudo journalctl -u jiaolong-labeler.service -f
 
 ## 6) Data layout
 
-- Images: `images/total`
+- Images: `images` (supports recursive subfolders)
 - Runtime state: `data/store.json`
-- Labels output: `labels/*.txt`
+- Labels output: `labels/<relative-image-path>.txt`
 - Export summary: `exports/last-export.json`
 
 ## 7) Manual verification

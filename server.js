@@ -8,7 +8,7 @@ const { URL } = require("url");
 const ROOT = __dirname;
 const CONFIG_DIR = path.join(ROOT, "config");
 const DATA_DIR = path.join(ROOT, "data");
-const IMAGE_DIR = path.join(ROOT, "images", "total");
+const IMAGE_DIR = path.join(ROOT, "images");
 const PUBLIC_DIR = path.join(ROOT, "public");
 const LABEL_DIR = path.join(ROOT, "labels");
 const EXPORT_DIR = path.join(ROOT, "exports");
@@ -247,16 +247,154 @@ function currentUser(req, appConfig) {
   return sid ? sessions.get(sid) : null;
 }
 
+function normalizeImageName(value) {
+  const raw = String(value || "").trim().replace(/\\/g, "/");
+  if (!raw) return null;
+  const normalized = path.posix.normalize(raw).replace(/^\/+/, "");
+  if (!normalized || normalized === "." || normalized.startsWith("..")) return null;
+  return normalized;
+}
+
+function resolvePathInDir(rootDir, relativePath) {
+  const normalized = normalizeImageName(relativePath);
+  if (!normalized) return null;
+  const fullPath = path.resolve(rootDir, ...normalized.split("/"));
+  if (fullPath === rootDir || fullPath.startsWith(`${rootDir}${path.sep}`)) {
+    return { normalized, fullPath };
+  }
+  return null;
+}
+
+function labelNameForImage(imageName) {
+  const normalized = normalizeImageName(imageName);
+  if (!normalized) return null;
+  const parsed = path.posix.parse(normalized);
+  return parsed.dir ? `${parsed.dir}/${parsed.name}.txt` : `${parsed.name}.txt`;
+}
+
+function legacyLabelNameForImage(imageName) {
+  const normalized = normalizeImageName(imageName);
+  if (!normalized) return null;
+  const parsed = path.posix.parse(path.posix.basename(normalized));
+  return `${parsed.name}.txt`;
+}
+
+function labelPathsForImage(imageName) {
+  const names = [labelNameForImage(imageName), legacyLabelNameForImage(imageName)].filter(Boolean);
+  const uniqueNames = [...new Set(names)];
+  const paths = [];
+  for (const relativeLabelName of uniqueNames) {
+    const fullPath = path.resolve(LABEL_DIR, ...relativeLabelName.split("/"));
+    if (fullPath === LABEL_DIR || fullPath.startsWith(`${LABEL_DIR}${path.sep}`)) {
+      paths.push(fullPath);
+    }
+  }
+  return paths;
+}
+
+function hasLabelForImage(imageName) {
+  return labelPathsForImage(imageName).some((labelPath) => fs.existsSync(labelPath));
+}
+
+function resolveImageNameFromInput(inputName, images) {
+  const normalized = normalizeImageName(inputName);
+  if (normalized && images.includes(normalized)) {
+    return { imageName: normalized };
+  }
+
+  if (normalized) {
+    const parsed = path.posix.parse(normalized);
+    const sameDirMatches = images.filter((name) => {
+      const imageParsed = path.posix.parse(name);
+      return imageParsed.dir === parsed.dir && imageParsed.name === parsed.name;
+    });
+    if (sameDirMatches.length === 1) return { imageName: sameDirMatches[0] };
+    if (sameDirMatches.length > 1) {
+      return { error: `存在多个同名图片，请使用完整文件名：${sameDirMatches.slice(0, 5).join("、")}` };
+    }
+  }
+
+  const raw = String(inputName || "").trim().replace(/\\/g, "/");
+  const rawBase = path.posix.basename(raw);
+  const rawStem = path.posix.parse(rawBase).name;
+  if (!rawStem) return { error: "缺少图片文件名" };
+
+  const matches = images.filter((name) => {
+    const base = path.posix.basename(name);
+    return base === rawBase || path.posix.parse(base).name === rawStem;
+  });
+
+  if (!matches.length) return { error: `找不到图片：${inputName}` };
+  if (matches.length > 1) {
+    return { error: `存在多个同名图片，请使用相对路径：${matches.slice(0, 5).join("、")}` };
+  }
+  return { imageName: matches[0] };
+}
+
 async function imageList() {
-  const files = await fsp.readdir(IMAGE_DIR);
-  return files.filter((file) => IMAGE_EXTS.has(path.extname(file).toLowerCase())).sort();
+  const images = [];
+
+  async function walk(currentDir, currentPrefix) {
+    const entries = await fsp.readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const relPath = currentPrefix ? `${currentPrefix}/${entry.name}` : entry.name;
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath, relPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!IMAGE_EXTS.has(path.extname(entry.name).toLowerCase())) continue;
+      images.push(relPath);
+    }
+  }
+
+  try {
+    await walk(IMAGE_DIR, "");
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+
+  return images.sort((a, b) => a.localeCompare(b));
+}
+
+async function labelFileList() {
+  const labels = [];
+
+  async function walk(currentDir, currentPrefix) {
+    const entries = await fsp.readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const relPath = currentPrefix ? `${currentPrefix}/${entry.name}` : entry.name;
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath, relPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.toLowerCase().endsWith(".txt")) continue;
+      labels.push(relPath);
+    }
+  }
+
+  try {
+    await walk(LABEL_DIR, "");
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+
+  return labels.sort((a, b) => a.localeCompare(b));
+}
+
+function removeImageExtension(imagePath) {
+  const parsed = path.posix.parse(imagePath);
+  return parsed.dir ? `${parsed.dir}/${parsed.name}` : parsed.name;
 }
 
 function safeImagePath(name) {
-  const base = path.basename(name);
-  const full = path.join(IMAGE_DIR, base);
-  if (!full.startsWith(IMAGE_DIR)) return null;
-  return full;
+  const resolved = resolvePathInDir(IMAGE_DIR, name);
+  return resolved ? resolved.fullPath : null;
 }
 
 function mimeFor(file) {
@@ -285,7 +423,7 @@ function normalizePoint(point) {
 }
 
 function labelPathForImage(imageName) {
-  return path.join(LABEL_DIR, `${path.parse(path.basename(imageName)).name}.txt`);
+  return labelPathsForImage(imageName)[0] || null;
 }
 
 function orderedPointDefs(template) {
@@ -366,17 +504,20 @@ function parseYoloLabel(imageName, text, template, fallback = {}) {
 
 async function annotationForImage(imageName, store, template) {
   const fallback = store.annotations?.[imageName] || { imageName, status: "draft", points: [] };
-  try {
-    const text = await fsp.readFile(labelPathForImage(imageName), "utf8");
-    return parseYoloLabel(imageName, text, template, fallback) || fallback;
-  } catch {
-    return fallback;
+  for (const labelPath of labelPathsForImage(imageName)) {
+    try {
+      const text = await fsp.readFile(labelPath, "utf8");
+      return parseYoloLabel(imageName, text, template, fallback) || fallback;
+    } catch {}
   }
+  return fallback;
 }
 
 async function writeLabelForAnnotation(annotation, template) {
-  await fsp.mkdir(LABEL_DIR, { recursive: true });
-  await fsp.writeFile(labelPathForImage(annotation.imageName), `${annotationToYolo(annotation, template)}\n`);
+  const labelPath = labelPathForImage(annotation.imageName);
+  if (!labelPath) throw new Error("无效图片名，无法写入标注文件");
+  await fsp.mkdir(path.dirname(labelPath), { recursive: true });
+  await fsp.writeFile(labelPath, `${annotationToYolo(annotation, template)}\n`);
 }
 
 async function exportLabels(appConfig) {
@@ -456,10 +597,10 @@ async function handleApi(req, res, url) {
   if (url.pathname === "/api/visualize" && req.method === "GET") {
     const rawName = String(url.searchParams.get("imageName") || "").trim();
     if (!rawName) return send(res, 400, { error: "缺少图片文件名" });
-    const imageBase = path.parse(path.basename(rawName)).name;
     const images = await imageList();
-    const imageName = images.find((name) => path.parse(name).name === imageBase || name === path.basename(rawName));
-    if (!imageName) return send(res, 404, { error: `找不到图片：${rawName}` });
+    const resolved = resolveImageNameFromInput(rawName, images);
+    if (resolved.error) return send(res, 404, { error: resolved.error });
+    const imageName = resolved.imageName;
 
     const store = await readJson(STORE_PATH, { annotations: {}, claims: {} });
     const annotation = await annotationForImage(imageName, store, template);
@@ -478,7 +619,7 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/visualize/save" && req.method === "POST") {
     const body = await readBody(req);
-    const imageName = path.basename(String(body.imageName || ""));
+    const imageName = normalizeImageName(body.imageName);
     if (!imageName || !Array.isArray(body.points)) return send(res, 400, { error: "缺少图片名或点位数据" });
     const images = await imageList();
     if (!images.includes(imageName)) return send(res, 404, { error: "图片不存在" });
@@ -504,9 +645,9 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/visualize/delete" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const imageName = path.basename(String(body.imageName || ""));
+    const imageName = normalizeImageName(body.imageName);
     if (!imageName) return send(res, 400, { error: "缺少图片名" });
-    await fsp.unlink(labelPathForImage(imageName)).catch(() => {});
+    await Promise.all(labelPathsForImage(imageName).map((labelPath) => fsp.unlink(labelPath).catch(() => {})));
     await withStore((store) => {
       delete store.annotations[imageName];
       delete store.claims[imageName];
@@ -519,18 +660,24 @@ async function handleApi(req, res, url) {
       imageList(),
       readJson(STORE_PATH, { annotations: {} })
     ]);
-    const labelFiles = new Set(
-      (await fsp.readdir(LABEL_DIR).catch(() => []))
-        .filter((file) => file.endsWith(".txt"))
-        .map((file) => path.parse(file).name)
-    );
+    const labelFiles = new Set(await labelFileList());
+    const labelBasePaths = new Set(Array.from(labelFiles).map((name) => removeImageExtension(name)));
     return send(res, 200, {
       images: images.map((imageName) => {
         const annotation = store.annotations?.[imageName] || {};
-        const annotated = labelFiles.has(path.parse(imageName).name);
+        const labelName = labelNameForImage(imageName);
+        const legacyLabelName = legacyLabelNameForImage(imageName);
+        const imageBasePath = removeImageExtension(imageName);
+        const legacyBasePath = removeImageExtension(path.posix.basename(imageName));
+        const annotated = Boolean(
+          (labelName && labelFiles.has(labelName)) ||
+          (legacyLabelName && labelFiles.has(legacyLabelName)) ||
+          labelBasePaths.has(imageBasePath) ||
+          labelBasePaths.has(legacyBasePath)
+        );
         return {
           imageName,
-          labelName: `${path.parse(imageName).name}.txt`,
+          labelName: labelName || "",
           annotated,
           updatedBy: annotation.updatedBy || null,
           updatedAt: annotation.updatedAt || null
@@ -550,15 +697,14 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/status" && req.method === "GET") {
     const [images, store] = await Promise.all([imageList(), readJson(STORE_PATH, { annotations: {}, claims: {} })]);
-    const labelFiles = await fsp.readdir(LABEL_DIR).catch(() => []);
-    const done = labelFiles.filter((file) => file.endsWith(".txt")).length;
+    const done = images.filter((imageName) => hasLabelForImage(imageName)).length;
     const mine = Object.values(store.claims || {}).filter((claim) => claim.userId === user.id).length;
-    const completedByMe = Object.values(store.annotations || {}).filter((annotation) => annotation.updatedBy === user.username && fs.existsSync(labelPathForImage(annotation.imageName))).length;
+    const completedByMe = Object.values(store.annotations || {}).filter((annotation) => annotation.updatedBy === user.username && hasLabelForImage(annotation.imageName)).length;
     return send(res, 200, { total: images.length, done, remaining: Math.max(images.length - done, 0), mine, completedByMe });
   }
 
   if (url.pathname === "/api/task" && req.method === "GET") {
-    const imageName = path.basename(String(url.searchParams.get("imageName") || ""));
+    const imageName = normalizeImageName(url.searchParams.get("imageName"));
     if (!imageName) return send(res, 400, { error: "缺少图片名" });
     const [images, store] = await Promise.all([imageList(), readJson(STORE_PATH, { annotations: {}, claims: {} })]);
     if (!images.includes(imageName)) return send(res, 404, { error: "图片不存在" });
@@ -567,13 +713,13 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/task/release" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const imageName = body.imageName ? path.basename(String(body.imageName)) : null;
+    const imageName = normalizeImageName(body.imageName);
     if (!imageName) return send(res, 400, { error: "缺少图片名" });
     await withStore((store) => {
       const claim = store.claims?.[imageName];
       if (claim?.userId === user.id) delete store.claims[imageName];
       const annotation = store.annotations?.[imageName];
-      if (annotation && (!annotation.points || annotation.points.length === 0) && !fs.existsSync(labelPathForImage(imageName))) {
+      if (annotation && (!annotation.points || annotation.points.length === 0) && !hasLabelForImage(imageName)) {
         delete store.annotations[imageName];
       }
     });
@@ -582,7 +728,7 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/task/next" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const skipImageName = body.skipImageName ? path.basename(String(body.skipImageName)) : null;
+    const skipImageName = normalizeImageName(body.skipImageName);
     const images = await imageList();
     const task = await withStore((store) => {
       const own = Object.entries(store.claims).find(
@@ -591,7 +737,7 @@ async function handleApi(req, res, url) {
       const imageName =
         own?.[0] ||
         images.find((name) => name !== skipImageName && !store.annotations[name] && !store.claims[name]) ||
-        images.find((name) => name !== skipImageName && fs.existsSync(labelPathForImage(name)));
+        images.find((name) => name !== skipImageName && hasLabelForImage(name));
       if (!imageName) return null;
       store.claims[imageName] = { userId: user.id, username: user.username, claimedAt: new Date().toISOString() };
       store.annotations[imageName] ||= { imageName, status: "draft", points: [], updatedBy: user.username, updatedAt: new Date().toISOString() };
@@ -606,11 +752,14 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/annotation" && req.method === "POST") {
     const body = await readBody(req);
-    if (!body.imageName || !Array.isArray(body.points)) return send(res, 400, { error: "缺少图片名或点位数据" });
+    const imageName = normalizeImageName(body.imageName);
+    if (!imageName || !Array.isArray(body.points)) return send(res, 400, { error: "缺少图片名或点位数据" });
+    const images = await imageList();
+    if (!images.includes(imageName)) return send(res, 404, { error: "图片不存在" });
     const saved = await withStore((store) => {
       const status = body.status === "done" ? "done" : "draft";
-      store.annotations[body.imageName] = {
-        imageName: body.imageName,
+      store.annotations[imageName] = {
+        imageName,
         status,
         points: body.points.map(normalizePoint),
         imageWidth: Number(body.imageWidth),
@@ -618,14 +767,14 @@ async function handleApi(req, res, url) {
         updatedBy: user.username,
         updatedAt: new Date().toISOString()
       };
-      store.claims[body.imageName] = { userId: user.id, username: user.username, claimedAt: store.claims[body.imageName]?.claimedAt || new Date().toISOString() };
-      if (status === "done") delete store.claims[body.imageName];
-      return store.annotations[body.imageName];
+      store.claims[imageName] = { userId: user.id, username: user.username, claimedAt: store.claims[imageName]?.claimedAt || new Date().toISOString() };
+      if (status === "done") delete store.claims[imageName];
+      return store.annotations[imageName];
     });
     if (body.writeLabel !== false && saved.points.length) {
       await writeLabelForAnnotation(saved, template);
       await withStore((store) => {
-        delete store.claims[body.imageName];
+        delete store.claims[imageName];
       });
     }
     return send(res, 200, { annotation: saved });
