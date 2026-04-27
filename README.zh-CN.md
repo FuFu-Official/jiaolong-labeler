@@ -2,11 +2,11 @@
 
 English README: `README.md`
 
-Jiaolong Labeler 是一个可配置的 YOLO 关键点标注工具。
+Jiaolong Labeler 是一个可配置的关键点标注工具。
 
 - 支持通过模板配置关键点，不再固定 4 点。
 - 支持两种部署方式：`local`（本地单机）和 `shared`（多人共享）。
-- 标注结果输出到 `labels/<图片名>.txt`，格式为 YOLO pose。
+- 标注结果输出到 `labels/<图片名>.txt`，格式由模板决定。
 
 ## 1）环境要求
 
@@ -73,6 +73,9 @@ cp config/app-config.example.json config/app-config.json
 ```json
 {
   "classId": 0,
+  "labelFormat": {
+    "type": "yolo_pose"
+  },
   "cornerNames": ["top_left", "bottom_left", "bottom_right", "top_right"],
   "exportOrder": ["corner_0", "corner_1", "corner_2", "corner_3"],
   "internalPoints": []
@@ -80,8 +83,32 @@ cp config/app-config.example.json config/app-config.json
 ```
 
 - `cornerNames`：界面中角点显示名称
-- `exportOrder`：YOLO 输出顺序
+- `labelFormat.type`：标注文件的读写格式
+- `exportOrder`：导出点位顺序
 - `internalPoints`：可选内部点
+
+当前支持的格式：
+
+- `yolo_pose`（默认）：`class cx cy w h x y v ...`
+- `xy_pairs`：只输出点坐标，例如 `x1 y1 x2 y2 x3 y3 x4 y4`
+
+如果你要输出“仅 4 个角点、每个点只有 2 个坐标”，模板可以这样写：
+
+```json
+{
+  "labelFormat": {
+    "type": "xy_pairs"
+  },
+  "cornerNames": ["top_left", "bottom_left", "bottom_right", "top_right"],
+  "exportOrder": ["corner_0", "corner_1", "corner_2", "corner_3"],
+  "internalPoints": []
+}
+```
+
+说明：
+
+- `xy_pairs` 不包含可见性和检测框。
+- 使用 `xy_pairs` 时，导出的所有点都必须先标全才能保存。
 
 最终关键点数量规则：
 

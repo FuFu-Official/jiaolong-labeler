@@ -1,7 +1,6 @@
 {
-  "classId": 0,
   "labelFormat": {
-    "type": "yolo_pose"
+    "type": "xy_pairs"
   },
   "cornerNames": ["top_left", "bottom_left", "bottom_right", "top_right"],
   "exportOrder": ["corner_0", "corner_1", "corner_2", "corner_3"],

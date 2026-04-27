@@ -51,6 +51,21 @@ function normalizeDeploymentMode(value) {
   return String(value || "").toLowerCase() === "shared" ? "shared" : "local";
 }
 
+function normalizeLabelFormat(rawFormat = {}) {
+  const source = typeof rawFormat === "object" && rawFormat ? rawFormat : {};
+  const type = String(source.type || "").trim().toLowerCase() || "yolo_pose";
+  const defaults = type === "xy_pairs"
+    ? { includeClassId: false, includeBox: false, includeVisibility: false }
+    : { includeClassId: true, includeBox: true, includeVisibility: true };
+
+  return {
+    type,
+    includeClassId: source.includeClassId === undefined ? defaults.includeClassId : source.includeClassId !== false,
+    includeBox: source.includeBox === undefined ? defaults.includeBox : source.includeBox !== false,
+    includeVisibility: source.includeVisibility === undefined ? defaults.includeVisibility : source.includeVisibility !== false
+  };
+}
+
 function defaultCornerNames(count) {
   const seeded = ["top_left", "bottom_left", "bottom_right", "top_right"];
   return Array.from({ length: count }, (_, index) => seeded[index] || `corner_${index + 1}`);
@@ -129,6 +144,7 @@ function normalizeTemplate(rawTemplate = {}, appConfig) {
     cornerNames,
     exportOrder: ordered,
     internalPoints,
+    labelFormat: normalizeLabelFormat(source.labelFormat),
     cornerCount: cornerNames.length,
     keypointCount: cornerNames.length + internalPoints.length
   };
@@ -144,7 +160,8 @@ async function readTemplate(appConfig) {
     classId: 0,
     cornerNames: defaultCornerNames(toPositiveInt(appConfig?.annotation?.cornerCount, DEFAULT_APP_CONFIG.annotation.cornerCount)),
     exportOrder: [],
-    internalPoints: []
+    internalPoints: [],
+    labelFormat: { type: "yolo_pose" }
   };
   return normalizeTemplate(await readJson(templatePath, fallback), appConfig);
 }
@@ -456,11 +473,18 @@ function orderedAnnotationPoints(annotation, template) {
   });
 }
 
-function annotationToYolo(annotation, template) {
-  const points = orderedAnnotationPoints(annotation, template);
+function requiredLabeledPoints(points, labelFormat) {
+  return labelFormat.includeVisibility ? points : points.filter((point) => point.labeled !== false);
+}
+
+function pointsForBox(points) {
   const visiblePoints = points.filter((point) => point.visible && Number.isFinite(point.x) && Number.isFinite(point.y));
   const labeledPoints = points.filter((point) => point.labeled !== false && Number.isFinite(point.x) && Number.isFinite(point.y));
-  const boxPoints = visiblePoints.length ? visiblePoints : labeledPoints;
+  return visiblePoints.length ? visiblePoints : labeledPoints;
+}
+
+function boundingBoxValues(points) {
+  const boxPoints = pointsForBox(points);
   if (!boxPoints.length) throw new Error("没有可导出的点位");
   const xs = boxPoints.map((point) => point.x);
   const ys = boxPoints.map((point) => point.y);
@@ -468,28 +492,65 @@ function annotationToYolo(annotation, template) {
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  const w = maxX - minX;
-  const h = maxY - minY;
-  const coords = points.flatMap((point) => [point.x, point.y, point.labeled === false ? 0 : point.visible ? 2 : 1]);
-  return [Number(template.classId || 0).toString(), ...[cx, cy, w, h, ...coords].map((value) => Number(value).toFixed(6))].join(" ");
+  return [(minX + maxX) / 2, (minY + maxY) / 2, maxX - minX, maxY - minY];
 }
 
-function parseYoloLabel(imageName, text, template, fallback = {}) {
+function serializeAnnotation(annotation, template) {
+  const points = orderedAnnotationPoints(annotation, template);
+  const labelFormat = normalizeLabelFormat(template.labelFormat);
+  const exportPoints = requiredLabeledPoints(points, labelFormat);
+  if (!exportPoints.length) throw new Error("没有可导出的点位");
+  if (!labelFormat.includeVisibility && exportPoints.length !== points.length) {
+    throw new Error("当前标签格式不支持缺失点，请先补全所有导出点位");
+  }
+
+  const values = [];
+  if (labelFormat.includeClassId) values.push(Number(template.classId || 0));
+  if (labelFormat.includeBox) values.push(...boundingBoxValues(points));
+
+  for (const point of points) {
+    if (!labelFormat.includeVisibility && point.labeled === false) {
+      throw new Error("当前标签格式不支持缺失点，请先补全所有导出点位");
+    }
+    values.push(point.x, point.y);
+    if (labelFormat.includeVisibility) values.push(point.labeled === false ? 0 : point.visible ? 2 : 1);
+  }
+
+  return values.map((value, index) => {
+    if (labelFormat.includeClassId && index === 0) return String(Math.trunc(value));
+    return Number(value).toFixed(6);
+  }).join(" ");
+}
+
+function parseSerializedAnnotation(imageName, text, template, fallback = {}) {
   const values = text.trim().split(/\s+/).map(Number);
-  if (values.length < 5) return null;
+  if (!values.length || values.some((value) => !Number.isFinite(value))) return null;
+
   const defs = orderedPointDefs(template);
+  const labelFormat = normalizeLabelFormat(template.labelFormat);
+  let offset = 0;
+  if (labelFormat.includeClassId) {
+    if (values.length < 1) return null;
+    offset += 1;
+  }
+  if (labelFormat.includeBox) {
+    if (values.length < offset + 4) return null;
+    offset += 4;
+  }
+
+  const stride = labelFormat.includeVisibility ? 3 : 2;
+  if (values.length < offset + defs.length * stride) return null;
+
   const points = [];
-  let offset = 5;
   for (const def of defs) {
     const x = values[offset];
     const y = values[offset + 1];
-    const visibility = values[offset + 2];
-    offset += 3;
+    const visibility = labelFormat.includeVisibility ? values[offset + 2] : 2;
+    offset += stride;
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(visibility) || visibility === 0) continue;
-    points.push({ ...def, x, y, visible: visibility === 2 });
+    points.push({ ...def, x, y, visible: labelFormat.includeVisibility ? visibility === 2 : true });
   }
+
   return {
     imageName,
     status: fallback.status || "done",
@@ -507,7 +568,7 @@ async function annotationForImage(imageName, store, template) {
   for (const labelPath of labelPathsForImage(imageName)) {
     try {
       const text = await fsp.readFile(labelPath, "utf8");
-      return parseYoloLabel(imageName, text, template, fallback) || fallback;
+      return parseSerializedAnnotation(imageName, text, template, fallback) || fallback;
     } catch {}
   }
   return fallback;
@@ -517,7 +578,7 @@ async function writeLabelForAnnotation(annotation, template) {
   const labelPath = labelPathForImage(annotation.imageName);
   if (!labelPath) throw new Error("无效图片名，无法写入标注文件");
   await fsp.mkdir(path.dirname(labelPath), { recursive: true });
-  await fsp.writeFile(labelPath, `${annotationToYolo(annotation, template)}\n`);
+  await fsp.writeFile(labelPath, `${serializeAnnotation(annotation, template)}\n`);
 }
 
 async function exportLabels(appConfig) {
@@ -545,6 +606,7 @@ async function handleApi(req, res, url) {
     annotation: {
       cornerCount: template.cornerCount,
       keypointCount: template.keypointCount,
+      labelFormat: template.labelFormat,
       templateFile: appConfig.annotation.templateFile
     }
   };

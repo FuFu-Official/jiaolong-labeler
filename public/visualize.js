@@ -106,7 +106,8 @@ function updateMeta() {
   const labeled = data.points.filter((point) => point.labeled !== false).length;
   const user = data.updatedBy || "未知";
   const time = data.updatedAt ? ` · ${formatDate(data.updatedAt)}` : "";
-  metaEl.textContent = `${labeled}/${data.expectedPointCount} points · 标注者：${user}${time} · source: ${data.source}`;
+  const formatType = data.template?.labelFormat?.type || runtime?.annotation?.labelFormat?.type || "yolo_pose";
+  metaEl.textContent = `${labeled}/${data.expectedPointCount} points · 标注者：${user}${time} · source: ${data.source} · format: ${formatType}`;
 }
 
 function updateHint() {

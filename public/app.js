@@ -83,6 +83,11 @@ function selectedCornerNames() {
   return cornerIds.map((id, index) => pointName(id, `corner_${index + 1}`));
 }
 
+function labelFormatText() {
+  const type = template?.labelFormat?.type || runtime?.annotation?.labelFormat?.type || "yolo_pose";
+  return type === "xy_pairs" ? "xy_pairs" : "yolo_pose";
+}
+
 function applyRuntimeUi() {
   const authTitle = document.querySelector("#authTitle");
   const appName = runtime.appName || "Jiaolong Labeler";
@@ -102,7 +107,7 @@ function updateStepText() {
     stepCorners.textContent = `依次点击 ${cornerIds.length} 个关键点：${names.join("、")}`;
   }
   if (stepExport) {
-    stepExport.textContent = `关键点将按模板顺序导出（共 ${template?.keypointCount || cornerIds.length} 个）`;
+    stepExport.textContent = `关键点将按模板顺序导出（共 ${template?.keypointCount || cornerIds.length} 个，格式 ${labelFormatText()}）`;
   }
   if (shortcutCorners) {
     shortcutCorners.textContent = `${cornerIds.length} 个关键点`;

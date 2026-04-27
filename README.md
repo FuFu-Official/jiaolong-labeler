@@ -2,11 +2,11 @@
 
 中文文档：`README.zh-CN.md`
 
-Jiaolong Labeler is a configurable YOLO keypoint annotation tool.
+Jiaolong Labeler is a configurable keypoint annotation tool.
 
 - Supports flexible keypoint setup by template file (not limited to 4 points).
 - Supports two deployment modes: `local` (single machine) and `shared` (multi-user collaboration).
-- Writes labels to `labels/<image-name>.txt` in YOLO pose format.
+- Writes labels to `labels/<image-name>.txt` in a template-defined format.
 
 ## 1) Requirements
 
@@ -73,6 +73,9 @@ Example:
 ```json
 {
   "classId": 0,
+  "labelFormat": {
+    "type": "yolo_pose"
+  },
   "cornerNames": ["top_left", "bottom_left", "bottom_right", "top_right"],
   "exportOrder": ["corner_0", "corner_1", "corner_2", "corner_3"],
   "internalPoints": []
@@ -80,8 +83,32 @@ Example:
 ```
 
 - `cornerNames`: UI display names for corner points
-- `exportOrder`: output order in YOLO label
+- `labelFormat.type`: output/input label format
+- `exportOrder`: point order in the exported label
 - `internalPoints`: optional generated/internal points
+
+Supported label formats:
+
+- `yolo_pose` (default): `class cx cy w h x y v ...`
+- `xy_pairs`: plain point coordinates only, such as `x1 y1 x2 y2 x3 y3 x4 y4`
+
+Example for 4-corner coordinate-only output:
+
+```json
+{
+  "labelFormat": {
+    "type": "xy_pairs"
+  },
+  "cornerNames": ["top_left", "bottom_left", "bottom_right", "top_right"],
+  "exportOrder": ["corner_0", "corner_1", "corner_2", "corner_3"],
+  "internalPoints": []
+}
+```
+
+Notes:
+
+- `xy_pairs` does not store visibility or bounding boxes.
+- When using `xy_pairs`, every exported point must be present before saving.
 
 Effective keypoint count is determined by the normalized template:
 
