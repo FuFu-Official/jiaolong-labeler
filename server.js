@@ -56,7 +56,9 @@ function normalizeLabelFormat(rawFormat = {}) {
   const type = String(source.type || "").trim().toLowerCase() || "yolo_pose";
   const defaults = type === "xy_pairs"
     ? { includeClassId: false, includeBox: false, includeVisibility: false }
-    : { includeClassId: true, includeBox: true, includeVisibility: true };
+    : type === "yolo_obb"
+      ? { includeClassId: true, includeBox: false, includeVisibility: false }
+      : { includeClassId: true, includeBox: true, includeVisibility: true };
 
   return {
     type,

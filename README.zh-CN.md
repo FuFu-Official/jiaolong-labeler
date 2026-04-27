@@ -90,7 +90,22 @@ cp config/app-config.example.json config/app-config.json
 当前支持的格式：
 
 - `yolo_pose`（默认）：`class cx cy w h x y v ...`
+- `yolo_obb`：`class_index x1 y1 x2 y2 x3 y3 x4 y4`
 - `xy_pairs`：只输出点坐标，例如 `x1 y1 x2 y2 x3 y3 x4 y4`
+
+如果你要输出 YOLO OBB，可以这样写：
+
+```json
+{
+  "classId": 0,
+  "labelFormat": {
+    "type": "yolo_obb"
+  },
+  "cornerNames": ["top_left", "bottom_left", "bottom_right", "top_right"],
+  "exportOrder": ["corner_0", "corner_1", "corner_2", "corner_3"],
+  "internalPoints": []
+}
+```
 
 如果你要输出“仅 4 个角点、每个点只有 2 个坐标”，模板可以这样写：
 
@@ -107,8 +122,9 @@ cp config/app-config.example.json config/app-config.json
 
 说明：
 
+- `yolo_obb` 会输出类别 id 和按 `exportOrder` 排列的归一化角点坐标。
 - `xy_pairs` 不包含可见性和检测框。
-- 使用 `xy_pairs` 时，导出的所有点都必须先标全才能保存。
+- 使用 `yolo_obb` 或 `xy_pairs` 时，导出的所有点都必须先标全才能保存。
 
 最终关键点数量规则：
 

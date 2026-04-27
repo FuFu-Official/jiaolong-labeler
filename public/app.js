@@ -85,7 +85,7 @@ function selectedCornerNames() {
 
 function labelFormatText() {
   const type = template?.labelFormat?.type || runtime?.annotation?.labelFormat?.type || "yolo_pose";
-  return type === "xy_pairs" ? "xy_pairs" : "yolo_pose";
+  return ["xy_pairs", "yolo_obb"].includes(type) ? type : "yolo_pose";
 }
 
 function applyRuntimeUi() {

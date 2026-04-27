@@ -90,7 +90,22 @@ Example:
 Supported label formats:
 
 - `yolo_pose` (default): `class cx cy w h x y v ...`
+- `yolo_obb`: `class_index x1 y1 x2 y2 x3 y3 x4 y4`
 - `xy_pairs`: plain point coordinates only, such as `x1 y1 x2 y2 x3 y3 x4 y4`
+
+Example for YOLO OBB output:
+
+```json
+{
+  "classId": 0,
+  "labelFormat": {
+    "type": "yolo_obb"
+  },
+  "cornerNames": ["top_left", "bottom_left", "bottom_right", "top_right"],
+  "exportOrder": ["corner_0", "corner_1", "corner_2", "corner_3"],
+  "internalPoints": []
+}
+```
 
 Example for 4-corner coordinate-only output:
 
@@ -107,8 +122,9 @@ Example for 4-corner coordinate-only output:
 
 Notes:
 
+- `yolo_obb` writes class id plus ordered normalized corner coordinates.
 - `xy_pairs` does not store visibility or bounding boxes.
-- When using `xy_pairs`, every exported point must be present before saving.
+- When using `yolo_obb` or `xy_pairs`, every exported point must be present before saving.
 
 Effective keypoint count is determined by the normalized template:
 
